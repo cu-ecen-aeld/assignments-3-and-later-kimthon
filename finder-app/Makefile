@@ -1,5 +1,9 @@
 CC = gcc
 
+ifdef CROSS_COMPILE
+CC = $(CROSS_COMPILE)gcc
+endif
+
 CFLAGS = -Wall -Wextra -g
 
 SRC = writer.c
