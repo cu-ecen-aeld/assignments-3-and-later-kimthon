@@ -43,8 +43,23 @@ int main(int argc, char *argv[]) {
 
     openlog("aesdsocket", LOG_PID | LOG_CONS, LOG_USER);
 
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+
+    // SIGNAL Setting
+    struct sigaction sa;
+    memset(&sa, 0x00, sizeof(struct sigaction));
+    sa.sa_handler=signal_handler;
+
+    if(sigaction(SIGINT, &sa, NULL) != 0)
+    {
+        syslog(LOG_ERR, "SIGINIT failed: %s", strerror(errno));
+        return -1;
+    }
+
+    if(sigaction(SIGTERM, &sa, NULL) != 0)
+    {
+        syslog(LOG_ERR, "SIGTERM failed: %s", strerror(errno));
+        return -1;
+    }
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
         syslog(LOG_ERR, "Socket creation failed: %s", strerror(errno));
