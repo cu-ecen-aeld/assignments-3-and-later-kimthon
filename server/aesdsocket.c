@@ -11,8 +11,9 @@
 #include <syslog.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 
-#define PORT 9000
+#define PORT "9000"
 #define BUFFER_SIZE 1024
 #define FILE_PATH "/var/tmp/aesdsocketdata"
 
@@ -36,9 +37,26 @@ void signal_handler(int signo) {
     }
 }
 
+char* get_ip_str(struct sockaddr_storage* addr, char* ip_str, size_t max_len) {
+    void* src_addr;
+    const char* result;
+
+    switch (addr->ss_family) {
+        case AF_INET:
+            src_addr = &(((struct sockaddr_in*)addr)->sin_addr);
+            break;
+        case AF_INET6:
+            src_addr = &(((struct sockaddr_in6*)addr)->sin6_addr);
+            break;
+        default:
+            return NULL;
+    }
+
+    result = inet_ntop(addr->ss_family, src_addr, ip_str, max_len);
+    return result ? ip_str : NULL;
+}
+
 int main(int argc, char *argv[]) {
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
     char buffer[BUFFER_SIZE] = {0};
 
     openlog("aesdsocket", LOG_PID | LOG_CONS, LOG_USER);
@@ -49,19 +67,32 @@ int main(int argc, char *argv[]) {
     memset(&sa, 0x00, sizeof(struct sigaction));
     sa.sa_handler=signal_handler;
 
-    if(sigaction(SIGINT, &sa, NULL) != 0)
-    {
+    if(sigaction(SIGINT, &sa, NULL) != 0) {
         syslog(LOG_ERR, "SIGINIT failed: %s", strerror(errno));
         return -1;
     }
 
-    if(sigaction(SIGTERM, &sa, NULL) != 0)
-    {
+    if(sigaction(SIGTERM, &sa, NULL) != 0) {
         syslog(LOG_ERR, "SIGTERM failed: %s", strerror(errno));
         return -1;
     }
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == -1) {
+
+    // IP ADDRESS SETTING
+    struct addrinfo hints, *res;
+
+    memset(&hints, 0x00, sizeof(struct addrinfo));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = AI_PASSIVE;
+
+    if(getaddrinfo(NULL, PORT, &hints, &res) != 0) {
+        syslog(LOG_ERR, "getaddrinfo failed: %s", strerror(errno));
+        return -1;
+    }
+
+    // SOCKET SETTING
+    if ((server_fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         syslog(LOG_ERR, "Socket creation failed: %s", strerror(errno));
         return -1;
     }
@@ -73,11 +104,8 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(PORT);
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+    if (bind(server_fd, res->ai_addr, res->ai_addrlen) < 0) {
         syslog(LOG_ERR, "Bind failed: %s", strerror(errno));
         close(server_fd);
         return -1;
@@ -112,15 +140,24 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
+    struct sockaddr_storage client_addr;
+    socklen_t addr_size = sizeof(struct sockaddr_storage);
+    char client_ip[INET6_ADDRSTRLEN];
     while (running) {
-        int new_socket;
-        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+        int new_socket = accept(server_fd, (struct sockaddr *)&client_addr, &addr_size);
+        if (new_socket < 0) {
             if (errno == EINTR) continue;
             syslog(LOG_ERR, "Accept failed: %s", strerror(errno));
             continue;
         }
 
-        char *client_ip = inet_ntoa(address.sin_addr);
+        char *ip_str = get_ip_str(&client_addr, client_ip, sizeof(client_ip));
+        if(ip_str == NULL)
+        {
+            syslog(LOG_ERR, "IP Client ERROR : %s", strerror(errno));
+            continue;
+        }
+
         syslog(LOG_INFO, "Accepted connection from %s", client_ip);
 
         int bytes_received;
