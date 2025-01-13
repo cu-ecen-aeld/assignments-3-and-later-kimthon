@@ -116,7 +116,12 @@ int main(int argc, char *argv[]) {
         signal(SIGHUP, SIG_IGN);
 
         umask(0);
-        chdir("/");
+        if(chdir("/") != 0)
+        {
+            syslog(LOG_ERR, "chdir failed: %s", strerror(errno));
+            close(server_fd);
+            return -1;
+        }
 
         close(STDIN_FILENO);
         close(STDOUT_FILENO);
